@@ -1,0 +1,25 @@
+name: KiosAPI trading quality benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/kiosapi_trading_quality_benchmark.py'
+      - '.github/workflows/kiosapi-trading-quality.yml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install httpx
+      - name: Evaluate free KiosAPI trading models
+        env:
+          KIOS_API_KEY: ${{ secrets.KIOS_API_KEY }}
+          KIOSAPI_BASE_URL: https://router.kiosapi.com/v1/
+          KIOSAPI_TRADING_BENCHMARK_MODELS: deepseek-v4-flash,deepseek-v4-flash-0731,qwen3.8-27b
+        run: python scripts/kiosapi_trading_quality_benchmark.py
