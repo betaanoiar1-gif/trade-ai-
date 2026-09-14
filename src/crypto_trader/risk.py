@@ -45,8 +45,9 @@ def validate_plan(
     if notional > max_notional:
         qty = max_notional / entry
         notional = qty * entry
-    if current_exposure + notional > equity * limits.max_portfolio_risk * limits.max_leverage:
-        return RiskDecision(False, "portfolio exposure limit reached")
+        risk_cash = qty * distance
+    if current_exposure + risk_cash > equity * limits.max_portfolio_risk:
+        return RiskDecision(False, "portfolio risk limit reached")
     if plan.take_profit_1 is not None:
         reward = (plan.take_profit_1 - entry) if plan.decision == "LONG" else (entry - plan.take_profit_1)
         if reward <= 0 or reward / distance < 1.0:
