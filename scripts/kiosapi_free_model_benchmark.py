@@ -21,42 +21,18 @@ KEY = os.getenv("KIOS_API_KEY") or os.getenv("KIOSAPI_API_KEY") or os.getenv("AI
 # present in this account's /models response. This prevents accidentally
 # probing arbitrary paid models.
 CURRENT_FREE_IDS = {
-    "kimi-k3",
-    "minimax-m3",
-    "glm-5.3-flash",
-    "glm-5.2",
-    "glm-5.3",
-    "deepseek-v4-flash",
-    "deepseek-v4-flash-0731",
-    "qwen3.8-27b",
-    "qwen3.8-flash",
-    "nemotron-3-ultra-550b-a55b",
-    "nemotron-3-super-120b-a12b",
-    "oc/nemotron-3.5-lightning",
-    "oc/mimo-v2.5",
-    "oc/big-pickle",
-    "oc/muse-spark-1.3-contributor",
-    "oc/muse-spark-1.2-contributor",
-    "ling-3.0-flash-fin",
-    "oc/ling-3.0-flash-fin",
-    "laguna-s-2.1",
-    "laguna-xs-2.1",
-    "gpt-oss-20b",
-    "hy3",
-    "agnes-2.5-flash",
-    "agnes-2.0-flash",
-    "sensenova-6.8-flash-lite",
+    "kimi-k3", "minimax-m3", "glm-5.3-flash", "glm-5.2", "glm-5.3",
+    "deepseek-v4-flash", "deepseek-v4-flash-0731", "qwen3.8-27b", "qwen3.8-flash",
+    "nemotron-3-ultra-550b-a55b", "nemotron-3-super-120b-a12b", "oc/nemotron-3.5-lightning",
+    "oc/mimo-v2.5", "oc/big-pickle", "oc/muse-spark-1.3-contributor", "oc/muse-spark-1.2-contributor",
+    "ling-3.0-flash-fin", "oc/ling-3.0-flash-fin", "laguna-s-2.1", "laguna-xs-2.1",
+    "gpt-oss-20b", "hy3", "agnes-2.5-flash", "agnes-2.0-flash", "sensenova-6.8-flash-lite",
     "north-mini-code",
 }
 
-# Optional explicit override for future KiosAPI catalog changes. Example:
-# KIOSAPI_FREE_MODELS="model-a,model-b,model-c"
 EXPLICIT_FREE = {
     x.strip() for x in os.getenv("KIOSAPI_FREE_MODELS", "").split(",") if x.strip()
 }
-
-# Do not consume the whole daily quota. The benchmark tests only the strongest
-# current free candidates first. Set KIOSAPI_BENCHMARK_LIMIT to increase it.
 DEFAULT_LIMIT = 12
 
 SYSTEM = """You are testing a crypto trading decision model. Do not invent market facts. Return JSON only. You are not executing trades."""
@@ -126,9 +102,6 @@ def is_free_candidate(model: dict[str, Any]) -> bool:
         return model_id in EXPLICIT_FREE
     if model_id in CURRENT_FREE_IDS:
         return True
-
-    # Some gateways expose pricing/free metadata. Honor it only when it is
-    # unambiguous; never infer free access from a model name alone.
     for key in ("free", "is_free"):
         if model.get(key) is True:
             return True
@@ -143,24 +116,11 @@ def is_free_candidate(model: dict[str, Any]) -> bool:
 
 
 def priority(model_id: str) -> int:
-    """Prefer strong reasoning models while keeping the benchmark small."""
     order = [
-        "kimi-k3",
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-0731",
-        "glm-5.3-flash",
-        "qwen3.8-27b",
-        "qwen3.8-flash",
-        "minimax-m3",
-        "nemotron-3-super-120b-a12b",
-        "nemotron-3-ultra-550b-a55b",
-        "oc/mimo-v2.5",
-        "gpt-oss-20b",
-        "glm-5.3",
-        "hy3",
-        "agnes-2.5-flash",
-        "oc/muse-spark-1.3-contributor",
-        "oc/big-pickle",
+        "kimi-k3", "deepseek-v4-flash", "deepseek-v4-flash-0731", "glm-5.3-flash",
+        "qwen3.8-27b", "qwen3.8-flash", "minimax-m3", "nemotron-3-super-120b-a12b",
+        "nemotron-3-ultra-550b-a55b", "oc/mimo-v2.5", "gpt-oss-20b", "glm-5.3",
+        "hy3", "agnes-2.5-flash", "oc/muse-spark-1.3-contributor", "oc/big-pickle",
     ]
     try:
         return order.index(model_id)
@@ -197,7 +157,6 @@ def main() -> int:
         print(f"FREE_CANDIDATES_VISIBLE={len(free_models)}")
         print("FREE_CANDIDATES")
         print(json.dumps([str(m.get("id")) for m in free_models], ensure_ascii=False))
-
         if not candidates:
             ids = [str(x.get("id")) for x in models if x.get("id")]
             print("NO_CURRENT_FREE_CANDIDATE_MATCHED")
@@ -212,20 +171,12 @@ def main() -> int:
 
     print("KIOSAPI_FREE_MODEL_BENCHMARK")
     for model_id, ok, detail, latency in results:
-        print(json.dumps({
-            "model": model_id,
-            "ok": ok,
-            "detail": detail,
-            "latency_s": round(latency, 3),
-        }))
+        print(json.dumps({"model": model_id, "ok": ok, "detail": detail, "latency_s": round(latency, 3)}))
 
     passing = [x for x in results if x[1]]
     if not passing:
         print("RESULT=NO_FREE_MODEL_PASSED")
         return 1
-
-    # This is only a connectivity/schema benchmark. The project must run a
-    # separate trading-quality benchmark before selecting the production model.
     best = min(passing, key=lambda x: (priority(x[0]), x[3]))
     print(f"BEST_CONNECTIVITY_MODEL={best[0]}")
     print("NOTE=Connectivity success does not imply trading quality or profitability")
