@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import time
+
 import httpx
 import pandas as pd
 
@@ -24,7 +26,10 @@ class BinancePublic:
         rows = _get(self.base + "/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
         if not rows:
             raise MarketDataError("empty klines")
-        cols = ["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
+        cols = [
+            "open_time", "open", "high", "low", "close", "volume", "close_time",
+            "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore",
+        ]
         df = pd.DataFrame(rows, columns=cols)
         for c in ["open", "high", "low", "close", "volume", "quote_volume", "taker_buy_base", "taker_buy_quote"]:
             df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -51,23 +56,36 @@ class BybitPublic:
     base = "https://api.bybit.com"
 
     def funding(self, symbol="BTCUSDT", category="linear"):
-        return _get(self.base + "/v5/market/funding/history", {"category": category, "symbol": symbol, "limit": 10}).get("result", {}).get("list", [])
+        return _get(
+            self.base + "/v5/market/funding/history",
+            {"category": category, "symbol": symbol, "limit": 10},
+        ).get("result", {}).get("list", [])
 
     def open_interest(self, symbol="BTCUSDT", interval="1h", category="linear", limit=50):
-        return _get(self.base + "/v5/market/open-interest", {"category": category, "symbol": symbol, "intervalTime": interval, "limit": limit}).get("result", {}).get("list", [])
+        return _get(
+            self.base + "/v5/market/open-interest",
+            {"category": category, "symbol": symbol, "intervalTime": interval, "limit": limit},
+        ).get("result", {}).get("list", [])
 
     def tickers(self, symbol="BTCUSDT", category="linear"):
-        return _get(self.base + "/v5/market/tickers", {"category": category, "symbol": symbol}).get("result", {}).get("list", [])
+        return _get(
+            self.base + "/v5/market/tickers", {"category": category, "symbol": symbol}
+        ).get("result", {}).get("list", [])
 
     def recent_trades(self, symbol="BTCUSDT", category="linear", limit=50):
-        return _get(self.base + "/v5/market/recent-trade", {"category": category, "symbol": symbol, "limit": limit}).get("result", {}).get("list", [])
+        return _get(
+            self.base + "/v5/market/recent-trade",
+            {"category": category, "symbol": symbol, "limit": limit},
+        ).get("result", {}).get("list", [])
 
 
 class DeribitPublic:
     base = "https://www.deribit.com/api/v2/public"
 
     def ticker(self, instrument="BTC-PERPETUAL"):
-        return _get(self.base + "/ticker", {"instrument_name": instrument}).get("result", {})
+        return _get(
+            self.base + "/ticker", {"instrument_name": instrument}
+        ).get("result", {})
 
 
 def data_age_seconds(timestamp) -> float:
