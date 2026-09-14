@@ -116,7 +116,7 @@ def derivative_metrics(funding: list, oi: list) -> dict:
     fr = _number(f, "fundingRate")
     now = _number(o, "openInterest")
     prev = _number(oi[1], "openInterest") if len(oi) > 1 else None
-    change = ((now / prev) - 1) * 100 if now is not None and prev not in (None, 0) else None
+    change = round(((now / prev) - 1) * 100, 10) if now is not None and prev not in (None, 0) else None
     return {
         "funding_rate": fr,
         "open_interest": now,
