@@ -1,8 +1,6 @@
 name: KiosAPI free model benchmark
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -17,4 +15,5 @@ jobs:
       - name: Test documented free models
         env:
           KIOS_API_KEY: ${{ secrets.KIOS_API_KEY }}
+          KIOSAPI_BASE_URL: https://router.kiosapi.com/v1/
         run: python scripts/kiosapi_free_model_benchmark.py
