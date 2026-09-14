@@ -1,28 +1,27 @@
 # Architecture
 
-## Runtime
-`Public Crypto APIs -> Data Normalizer -> Quant/TA Engine -> Trader Tools -> One Crypto Trader AI -> Deterministic Risk Firewall -> Paper Broker -> Journal/State -> Dashboard`
+`Public Crypto APIs -> Data Quality -> Quant/TA Engine -> Trader Evidence -> One Crypto Trader AI -> Deterministic Risk Firewall -> Paper Broker -> SQLite State/Journal -> Dashboard`
 
-The AI is an interpreter/decision-maker, not a calculator. Exact indicators, sizing, fees and portfolio constraints are deterministic code.
+## Trader doctrine
+1. Establish market/regime context.
+2. Inspect 1D -> 4H -> 1H -> 15M -> 5M hierarchy.
+3. Evaluate trend, support/resistance, structure, price action, momentum and volume.
+4. Add derivatives context: funding and open interest; other derivatives are optional only when a verified public source is available.
+5. Treat liquidity/SMC concepts as hypotheses, never guaranteed signals.
+6. Evaluate volatility, volume profile and Fibonacci context.
+7. Build primary/alternative scenarios with explicit invalidation.
+8. Only then produce LONG/SHORT/HOLD/WAIT/NO_TRADE.
+9. The risk firewall independently validates size, leverage, exposure and stop/target logic.
+10. The paper broker applies fees, slippage, funding support and conservative liquidation checks.
 
-## Analysis doctrine
-1. Establish BTC/market context and regime.
-2. Inspect higher timeframe structure before execution timeframe.
-3. Evaluate trend, support/resistance, price action, momentum and volume.
-4. Add derivatives context: funding, OI, liquidations and basis when available.
-5. Evaluate liquidity/SMC concepts as hypotheses, never facts.
-6. Check volatility and correlation.
-7. Check available crypto news/catalysts.
-8. Build primary and alternative scenarios with explicit invalidation.
-9. Only then create a trade plan.
-10. Risk engine independently validates size/exposure.
-11. Paper broker models fees and slippage.
+## AI boundary
+The AI interprets evidence and proposes a plan. It does not calculate raw indicators, invent unavailable data, size positions, or bypass risk controls.
 
 ## Free-data policy
-Public endpoints are preferred. API adapters must expose freshness and completeness. Missing data becomes `unavailable`, never zero. A provider failure cannot silently become synthetic data.
+Public endpoints are preferred. Missing or failed data is marked unavailable; it is never replaced with synthetic zeros. The base project has no paid-data requirement.
 
-## Colab resilience
-Persistent state must be saved to a durable location/repository artifact before session termination and loaded on startup. The trading engine is idempotent: repeated execution of the same market event cannot duplicate a paper order.
+## Persistence
+SQLite stores decisions, trades, paper account and open positions so a Colab/local restart can restore state. For Colab, the SQLite file should be placed on persistent Google Drive storage.
 
 ## Explicit non-goals
-No strategy generation, strategy mutation/evolution, paid-data dependency, live-money execution, fake metrics, hidden look-ahead, or forced trade frequency.
+No strategy generation/evolution, no multi-agent debate system, no fake metrics, no hidden look-ahead, no forced trade frequency, and no real-money exchange execution.
