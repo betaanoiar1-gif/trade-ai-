@@ -17,7 +17,7 @@ BASE = (
 KEY = os.getenv("KIOS_API_KEY") or os.getenv("KIOSAPI_API_KEY") or os.getenv("AI_API_KEY", "")
 MODELS = [x.strip() for x in os.getenv("KIOSAPI_TRADING_BENCHMARK_MODELS", "deepseek-v4-flash,deepseek-v4-flash-0731,qwen3.8-27b").split(",") if x.strip()]
 REQUEST_INTERVAL_S = float(os.getenv("KIOSAPI_BENCHMARK_REQUEST_INTERVAL_S", "7.0"))
-MAX_TOKENS = int(os.getenv("KIOSAPI_TRADING_BENCHMARK_MAX_TOKENS", "1200"))
+MAX_TOKENS = int(os.getenv("KIOSAPI_TRADING_BENCHMARK_MAX_TOKENS", "2048"))
 
 
 @dataclass(frozen=True)
@@ -34,12 +34,12 @@ CASES = [
     Case("range_no_trade", "NO_TRADE", """SOLUSDT perpetual. Current price 148.2. 4H price is inside a 142-154 range with repeated failed breaks on both sides. 1H EMA20 and EMA50 are flat and intertwined, ADX 14, RSI 51. Volume is 0.8x its 20-period average. Funding is 0.001%, OI is flat. No clean liquidity sweep or confirmed BOS is present. No liquidation data is available. No external news is supplied. There is no validated entry, stop, or directional edge at the current price. A breakout and successful retest would be required before considering a directional trade.""", ("range", "ADX", "RSI", "volume", "OI")),
 ]
 
-SYSTEM = """You are the decision engine of a crypto paper-trading research system. Use only the supplied market facts. Never invent missing data. Treat SMC/liquidity interpretations as hypotheses, not certainties. Return one compact JSON object only. Do not execute a trade. Confidence is not probability of profit. Respect the requested decision when the evidence supports it, but independently evaluate the case. Keep reasoning internal and keep the final JSON concise."""
-PROMPT = """Analyze this deterministic crypto market case and return exactly one compact JSON object with these keys:
- decision, confidence, entry_low, entry_high, stop, take_profit_1, take_profit_2, thesis, invalidation, warnings.
+SYSTEM = """You are the decision engine of a crypto paper-trading research system. Use only the supplied market facts. Never invent missing data. Treat SMC/liquidity interpretations as hypotheses, not certainties. Return exactly one compact JSON object. Do not execute a trade. Confidence is not probability of profit. Keep all reasoning internal. Output only the requested JSON object with no markdown and no explanation."""
+PROMPT = """Analyze this deterministic crypto market case. Return exactly one compact JSON object with these keys and no others:
+decision, confidence, entry_low, entry_high, stop, take_profit_1, take_profit_2, thesis, invalidation, warnings.
 Allowed decision values: LONG, SHORT, HOLD, WAIT, NO_TRADE.
-Use numeric price fields or null. Confidence must be a number from 0 to 1. If proposing LONG/SHORT, provide a logically placed stop and TP1 with at least 1:1 reward/risk. If the case has no validated edge, use NO_TRADE and leave price fields null.
-Keep thesis and invalidation to one short sentence each and warnings to a short list. Do not mention indicators or data that are absent from the case.
+Use numeric price fields or null. Confidence must be 0 to 1. If LONG/SHORT, provide a logically placed stop and TP1 with at least 1:1 reward/risk. If there is no validated edge, use NO_TRADE and set all five price fields to null.
+Keep thesis and invalidation to one short sentence each. Keep warnings to a short list. Do not mention indicators or data absent from the case.
 
 CASE:
 {snapshot}
@@ -48,7 +48,8 @@ CASE:
 
 def _content_candidates(message: dict[str, Any]) -> list[str]:
     candidates: list[str] = []
-    for key in ("content", "reasoning_content", "reasoning", "text", "output_text"):
+    # Prefer final-answer channels. Reasoning is only a fallback when it is not truncated.
+    for key in ("content", "text", "output_text"):
         value = message.get(key)
         if isinstance(value, str) and value.strip():
             candidates.append(value)
@@ -58,13 +59,14 @@ def _content_candidates(message: dict[str, Any]) -> list[str]:
                 if isinstance(item, str):
                     parts.append(item)
                 elif isinstance(item, dict):
-                    for field in ("text", "content", "output_text", "reasoning_content"):
+                    for field in ("text", "content", "output_text"):
                         part = item.get(field)
                         if isinstance(part, str):
                             parts.append(part)
                             break
             if parts:
                 candidates.append("".join(parts))
+
     tool_calls = message.get("tool_calls")
     if isinstance(tool_calls, list):
         for call in tool_calls:
@@ -75,6 +77,7 @@ def _content_candidates(message: dict[str, Any]) -> list[str]:
                 arguments = function.get("arguments")
                 if isinstance(arguments, str) and arguments.strip():
                     candidates.append(arguments)
+
     function_call = message.get("function_call")
     if isinstance(function_call, dict):
         arguments = function_call.get("arguments")
@@ -141,7 +144,8 @@ def parse_response(data: dict[str, Any]) -> dict[str, Any]:
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
         raise ValueError("missing choices")
-    message = choices[0].get("message")
+    choice = choices[0]
+    message = choice.get("message")
     if not isinstance(message, dict):
         raise ValueError("missing message")
     errors: list[str] = []
@@ -222,7 +226,13 @@ def run_model(client: httpx.Client, model: str) -> list[dict[str, Any]]:
             r = client.post(
                 f"{BASE}/chat/completions",
                 headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"},
-                json={"model": model, "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": PROMPT.format(snapshot=case.snapshot)}], "temperature": 0.0, "max_tokens": MAX_TOKENS},
+                json={
+                    "model": model,
+                    "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": PROMPT.format(snapshot=case.snapshot)}],
+                    "temperature": 0.0,
+                    "max_tokens": MAX_TOKENS,
+                    "response_format": {"type": "json_object"},
+                },
             )
             elapsed = time.perf_counter() - started
             if r.status_code >= 400:
@@ -245,12 +255,13 @@ def main() -> int:
     if not KEY: raise SystemExit("KIOS_API_KEY is not configured")
     if not MODELS: raise SystemExit("No benchmark models configured")
     if REQUEST_INTERVAL_S < 6.0: raise SystemExit("KIOSAPI_BENCHMARK_REQUEST_INTERVAL_S must be >= 6 seconds")
-    if MAX_TOKENS < 800: raise SystemExit("KIOSAPI_TRADING_BENCHMARK_MAX_TOKENS must be >= 800")
+    if MAX_TOKENS < 800 or MAX_TOKENS > 2048: raise SystemExit("KIOSAPI_TRADING_BENCHMARK_MAX_TOKENS must be between 800 and 2048")
     print(f"KIOSAPI_BASE_URL={BASE}")
     print(f"MODELS={json.dumps(MODELS)}")
     print(f"CASES={len(CASES)}")
     print(f"REQUEST_INTERVAL_S={REQUEST_INTERVAL_S}")
     print(f"MAX_TOKENS={MAX_TOKENS}")
+    print("RESPONSE_FORMAT=json_object")
     summaries = []
     with httpx.Client(timeout=60.0) as client:
         for model in MODELS:
