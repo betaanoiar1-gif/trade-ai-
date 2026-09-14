@@ -9,9 +9,11 @@ class AIError(RuntimeError): pass
 class AIGateway:
     """OpenAI-compatible gateway with bounded retries and strict schema validation."""
     def __init__(self, base_url: str|None=None, api_key: str|None=None, model: str|None=None):
-        self.base=(base_url or os.getenv("AI_BASE_URL","")).rstrip("/")
-        self.key=api_key or os.getenv("AI_API_KEY","")
-        self.model=model or os.getenv("AI_MODEL","")
+        # KiosAPI can be configured with KIOS_API_KEY alone; generic AI_* remains supported.
+        kios_key = os.getenv("KIOS_API_KEY") or os.getenv("KIOSAPI_API_KEY", "")
+        self.base=(base_url or os.getenv("AI_BASE_URL") or os.getenv("KIOSAPI_BASE_URL") or ("https://api.kiosapi.id/v1" if kios_key else "")).rstrip("/")
+        self.key=api_key or os.getenv("AI_API_KEY") or kios_key
+        self.model=model or os.getenv("AI_MODEL", "")
         self.timeout=float(os.getenv("AI_TIMEOUT", "45"))
         self.retries=max(0,int(os.getenv("AI_RETRIES", "2")))
     def enabled(self): return bool(self.base and self.key and self.model)
