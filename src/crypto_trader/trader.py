@@ -37,8 +37,9 @@ class CryptoTrader:
         self.state.log_decision(snap["timestamp"],self.symbol,plan)
         if plan["decision"] in {"LONG","SHORT"}:
             tp=TradePlan(symbol=self.symbol,decision=plan["decision"],confidence=plan["confidence"],entry_low=plan["entry_low"],entry_high=plan["entry_high"],stop=plan["stop"],take_profit_1=plan["take_profit_1"],take_profit_2=plan["take_profit_2"],thesis=plan["thesis"],invalidation=plan["invalidation"],warnings=tuple(plan["warnings"]),timestamp=snap["timestamp"])
-            equity=self._account_equity(); account=self.state.get("paper_account") or {}
-            current_exposure=float(account.get("exposure", 0.0) or 0.0)
-            risk=validate_plan(tp,equity,self.limits,price=snap["price"],current_exposure=current_exposure)
-            return {"mode":"ai","snapshot":snap,"plan":plan,"risk":risk.__dict__,"paper_equity":equity}
+            equity=self._account_equity()
+            daily_pnl=self.state.daily_realized_pnl()
+            current_exposure=self.state.open_exposure()
+            risk=validate_plan(tp,equity,self.limits,daily_pnl=daily_pnl,price=snap["price"],current_exposure=current_exposure)
+            return {"mode":"ai","snapshot":snap,"plan":plan,"risk":risk.__dict__,"paper_equity":equity,"daily_realized_pnl":daily_pnl,"current_exposure":current_exposure}
         return {"mode":"ai","snapshot":snap,"plan":plan,"risk":{"allowed":False,"reason":"non-executable decision"}}
