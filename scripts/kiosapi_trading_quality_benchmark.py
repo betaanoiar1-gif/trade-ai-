@@ -24,9 +24,6 @@ MODELS = [
     if x.strip()
 ]
 
-# KiosAPI has recently returned HTTP 429 after roughly 10 requests/minute for this
-# free key. Keep the benchmark deliberately below that ceiling so a rate limit is
-# not mistaken for a model-quality failure.
 REQUEST_INTERVAL_S = float(os.getenv("KIOSAPI_BENCHMARK_REQUEST_INTERVAL_S", "7.0"))
 
 
@@ -59,12 +56,12 @@ CASES = [
     ),
 ]
 
-SYSTEM = """You are the decision engine of a crypto paper-trading research system. Use only the supplied market facts. Never invent missing data. Treat SMC/liquidity interpretations as hypotheses, not certainties. Return JSON only. Do not execute a trade. Confidence is not probability of profit. Respect the requested decision when the evidence supports it, but independently evaluate the case."""
+SYSTEM = """You are the decision engine of a crypto paper-trading research system. Use only the supplied market facts. Never invent missing data. Treat SMC/liquidity interpretations as hypotheses, not certainties. Return one JSON object only. Do not execute a trade. Confidence is not probability of profit. Respect the requested decision when the evidence supports it, but independently evaluate the case."""
 
 PROMPT = """Analyze this deterministic crypto market case and return exactly one JSON object with these keys:
  decision, confidence, entry_low, entry_high, stop, take_profit_1, take_profit_2, thesis, invalidation, warnings.
 Allowed decision values: LONG, SHORT, HOLD, WAIT, NO_TRADE.
-Use numeric price fields or null. If proposing LONG/SHORT, provide a logically placed stop and TP1 with at least 1:1 reward/risk. If the case has no validated edge, use NO_TRADE and leave price fields null.
+Use numeric price fields or null. Confidence must be a number from 0 to 1. If proposing LONG/SHORT, provide a logically placed stop and TP1 with at least 1:1 reward/risk. If the case has no validated edge, use NO_TRADE and leave price fields null.
 Do not mention indicators or data that are absent from the case.
 
 CASE:
@@ -72,14 +69,36 @@ CASE:
 """
 
 
+def _extract_json(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        if first_newline >= 0:
+            text = text[first_newline + 1 :]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        raise json.JSONDecodeError("no JSON object found", text, 0)
+    return text[start : end + 1]
+
+
 def parse_response(data: dict[str, Any]) -> dict[str, Any]:
     content = data["choices"][0]["message"]["content"]
     if isinstance(content, list):
         content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
-    text = str(content).strip()
-    if text.startswith("```"):
-        text = text.strip("`").replace("json\n", "", 1).strip()
-    return json.loads(text)
+    return json.loads(_extract_json(str(content)))
+
+
+def _as_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def score(obj: dict[str, Any], case: Case) -> tuple[int, list[str]]:
@@ -100,8 +119,8 @@ def score(obj: dict[str, Any], case: Case) -> tuple[int, list[str]]:
     else:
         notes.append(f"decision_mismatch={obj.get('decision')}")
 
-    confidence = obj.get("confidence")
-    if isinstance(confidence, (int, float)) and 0 <= confidence <= 1:
+    confidence = _as_number(obj.get("confidence"))
+    if confidence is not None and 0 <= confidence <= 1:
         score += 10
     else:
         notes.append("confidence_invalid")
@@ -125,8 +144,8 @@ def score(obj: dict[str, Any], case: Case) -> tuple[int, list[str]]:
         else:
             notes.append("no_trade_contains_prices")
     else:
-        nums = [obj.get(k) for k in ("entry_low", "entry_high", "stop", "take_profit_1")]
-        if all(isinstance(x, (int, float)) and x > 0 for x in nums):
+        nums = [_as_number(obj.get(k)) for k in ("entry_low", "entry_high", "stop", "take_profit_1")]
+        if all(x is not None and x > 0 for x in nums):
             score += 10
             lo, hi, stop, tp1 = nums
             entry = (lo + hi) / 2
