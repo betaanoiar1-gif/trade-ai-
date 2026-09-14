@@ -24,7 +24,8 @@ def test_derivatives():
     d = derivative_metrics(
         [{"fundingRate": "0.001"}], [{"openInterest": "110"}, {"openInterest": "100"}]
     )
-    assert d["funding_rate"] == 0.001 and d["open_interest_change_pct"] == 10
+    assert d["funding_rate"] == 0.001
+    assert d["open_interest_change_pct"] == 10
     missing = derivative_metrics([], [])
     assert missing["funding_rate"] is None and missing["open_interest"] is None and not missing["available"]
 
@@ -38,6 +39,15 @@ def test_risk_long_and_short():
         )
         out = validate_plan(p, 1000, limits, price=100)
         assert out.allowed and out.qty > 0
+
+
+def test_portfolio_risk_is_stop_loss_risk():
+    limits = RiskLimits()
+    p = TradePlan("BTCUSDT", "LONG", 0.8, stop=95, take_profit_1=110)
+    out = validate_plan(p, 1000, limits, price=100, current_exposure=45)
+    assert not out.allowed
+    out = validate_plan(p, 1000, limits, price=100, current_exposure=40)
+    assert out.allowed
 
 
 def test_paper_short_and_stop():
@@ -55,8 +65,8 @@ def test_state(tmp_path):
     s.log_trade("2026-09-14T10:00:00+00:00", "BTCUSDT", "CLOSE", {"pnl": -7.5})
     s.log_trade("2026-09-14T11:00:00+00:00", "BTCUSDT", "CLOSE", {"pnl": 2.5})
     assert s.daily_realized_pnl("2026-09-14") == -5.0
-    s.set("paper_positions", {"BTCUSDT": {"qty": 2, "entry": 100}})
-    assert s.open_exposure() == 200.0
+    s.set("paper_positions", {"BTCUSDT": {"qty": 2, "entry": 100, "stop": 95}})
+    assert s.open_exposure() == 10.0
     s.close()
 
 
