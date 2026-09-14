@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -69,27 +70,84 @@ CASE:
 """
 
 
-def _extract_json(text: str) -> str:
+def _content_candidates(message: dict[str, Any]) -> list[str]:
+    """Collect common OpenAI-compatible response fields without logging secrets."""
+    candidates: list[str] = []
+    for key in ("content", "reasoning_content", "text", "output_text"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            candidates.append(value)
+        elif isinstance(value, list):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    for field in ("text", "content", "output_text"):
+                        part = item.get(field)
+                        if isinstance(part, str):
+                            parts.append(part)
+                            break
+            if parts:
+                candidates.append("".join(parts))
+    return candidates
+
+
+def _json_objects(text: str) -> list[str]:
+    """Return balanced JSON-object candidates, including fenced JSON."""
     text = text.strip()
-    if text.startswith("```"):
-        first_newline = text.find("\n")
-        if first_newline >= 0:
-            text = text[first_newline + 1 :]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
-        raise json.JSONDecodeError("no JSON object found", text, 0)
-    return text[start : end + 1]
+    candidates: list[str] = []
+
+    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    candidates.extend(fenced)
+
+    starts = [i for i, ch in enumerate(text) if ch == "{"]
+    for start in starts:
+        depth = 0
+        in_string = False
+        escaped = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidates.append(text[start : i + 1])
+                    break
+    return list(dict.fromkeys(candidates))
 
 
 def parse_response(data: dict[str, Any]) -> dict[str, Any]:
-    content = data["choices"][0]["message"]["content"]
-    if isinstance(content, list):
-        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
-    return json.loads(_extract_json(str(content)))
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("missing choices")
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise ValueError("missing message")
+
+    errors: list[str] = []
+    for text in _content_candidates(message):
+        for candidate in _json_objects(text):
+            try:
+                obj = json.loads(candidate)
+            except json.JSONDecodeError as exc:
+                errors.append(exc.msg)
+                continue
+            if isinstance(obj, dict):
+                return obj
+    detail = errors[0] if errors else "no JSON object found"
+    raise json.JSONDecodeError(detail, "", 0)
 
 
 def _as_number(value: Any) -> float | None:
@@ -148,13 +206,21 @@ def score(obj: dict[str, Any], case: Case) -> tuple[int, list[str]]:
         if all(x is not None and x > 0 for x in nums):
             score += 10
             lo, hi, stop, tp1 = nums
+            if lo > hi:
+                notes.append("entry_range_invalid")
+                return 0, notes
             entry = (lo + hi) / 2
-            if case.expected == "LONG" and stop < entry < tp1:
-                score += 5
-            elif case.expected == "SHORT" and tp1 < entry < stop:
-                score += 5
+            distance = abs(entry - stop)
+            reward = (tp1 - entry) if case.expected == "LONG" else (entry - tp1)
+            if distance > 0 and reward >= distance:
+                if case.expected == "LONG" and stop < entry < tp1:
+                    score += 5
+                elif case.expected == "SHORT" and tp1 < entry < stop:
+                    score += 5
+                else:
+                    notes.append("trade_geometry_invalid")
             else:
-                notes.append("trade_geometry_invalid")
+                notes.append("reward_risk_below_1")
         else:
             notes.append("trade_price_fields_invalid")
 
@@ -210,18 +276,37 @@ def main() -> int:
     with httpx.Client(timeout=45.0) as client:
         for model in MODELS:
             results = run_model(client, model)
-            valid = [x for x in results if x["ok"]]
-            avg = sum(x["score"] for x in valid) / len(valid) if valid else 0.0
+            avg = sum(x["score"] for x in results) / len(results) if results else 0.0
+            valid_cases = sum(1 for x in results if x["ok"])
             avg_latency = sum(x["latency_s"] for x in results) / len(results)
-            summary = {"model": model, "avg_score": round(avg, 2), "avg_latency_s": round(avg_latency, 3), "results": results}
+            all_cases_valid = valid_cases == len(CASES)
+            summary = {
+                "model": model,
+                "avg_score": round(avg, 2),
+                "avg_latency_s": round(avg_latency, 3),
+                "valid_cases": valid_cases,
+                "all_cases_valid": all_cases_valid,
+                "results": results,
+            }
             summaries.append(summary)
             print("MODEL_RESULT=" + json.dumps(summary, ensure_ascii=False))
 
-    ranked = sorted(summaries, key=lambda x: (-x["avg_score"], x["avg_latency_s"]))
+    ranked = sorted(
+        summaries,
+        key=lambda x: (
+            not x["all_cases_valid"],
+            -x["avg_score"],
+            x["avg_latency_s"],
+        ),
+    )
     print("TRADING_QUALITY_RANKING=" + json.dumps(ranked, ensure_ascii=False))
-    if ranked:
-        print(f"BEST_TRADING_MODEL={ranked[0]['model']}")
-        print("NOTE=This benchmark measures deterministic reasoning/schema discipline, not profitability or future returns")
+    qualified = [x for x in ranked if x["all_cases_valid"]]
+    if qualified:
+        print(f"BEST_TRADING_MODEL={qualified[0]['model']}")
+    else:
+        print("BEST_TRADING_MODEL=INCONCLUSIVE")
+        print("NOTE=No model passed all benchmark cases; do not select a production model from this run")
+    print("NOTE=This benchmark measures deterministic reasoning/schema discipline, not profitability or future returns")
     return 0
 
 
