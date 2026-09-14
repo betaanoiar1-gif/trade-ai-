@@ -1,14 +1,19 @@
 from __future__ import annotations
-import httpx, pandas as pd
+import httpx
+import pandas as pd
 
 class MarketDataError(RuntimeError): pass
 
 class BinancePublic:
     base="https://api.binance.com"
     def klines(self,symbol="BTCUSDT",interval="1h",limit=500):
-        r=httpx.get(self.base+"/api/v3/klines",params={"symbol":symbol,"interval":interval,"limit":limit},timeout=15); r.raise_for_status(); rows=r.json()
+        r=httpx.get(self.base+"/api/v3/klines",params={"symbol":symbol,"interval":interval,"limit":limit},timeout=15)
+        r.raise_for_status(); rows=r.json()
         if not rows: raise MarketDataError("empty klines")
-        return pd.DataFrame(rows,columns=["open_time","open","high","low","close","volume","close_time","quote_volume","trades","taker_buy_base","taker_buy_quote","ignore"]).assign(**{c:lambda x:pd.to_numeric(x[c]) for c in ["open","high","low","close","volume"]})
+        cols=["open_time","open","high","low","close","volume","close_time","quote_volume","trades","taker_buy_base","taker_buy_quote","ignore"]
+        df=pd.DataFrame(rows,columns=cols)
+        for c in ["open","high","low","close","volume"]: df[c]=pd.to_numeric(df[c],errors="coerce")
+        return df
     def depth(self,symbol="BTCUSDT",limit=100):
         r=httpx.get(self.base+"/api/v3/depth",params={"symbol":symbol,"limit":limit},timeout=15); r.raise_for_status(); return r.json()
 
