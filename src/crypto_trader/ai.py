@@ -2,11 +2,12 @@ from __future__ import annotations
 import json, os, time
 from typing import Any
 import httpx
+from .decision import AIDecision
 
 class AIError(RuntimeError): pass
 
 class AIGateway:
-    """OpenAI-compatible gateway with bounded retries and strict JSON extraction."""
+    """OpenAI-compatible gateway with bounded retries and strict schema validation."""
     def __init__(self, base_url: str|None=None, api_key: str|None=None, model: str|None=None):
         self.base=(base_url or os.getenv("AI_BASE_URL","")).rstrip("/")
         self.key=api_key or os.getenv("AI_API_KEY","")
@@ -39,15 +40,10 @@ class AIGateway:
             text=text.strip("`").replace("json\n", "", 1).strip()
         try: obj=json.loads(text)
         except json.JSONDecodeError as exc: raise AIError("AI returned invalid JSON") from exc
-        required={"decision","confidence","entry_low","entry_high","stop","take_profit_1","take_profit_2","thesis","invalidation","warnings"}
-        missing=required-set(obj)
-        if missing: raise AIError(f"AI plan missing keys: {sorted(missing)}")
-        if obj["decision"] not in {"LONG","SHORT","HOLD","WAIT","NO_TRADE"}: raise AIError("invalid decision")
-        try: obj["confidence"]=float(obj["confidence"])
-        except (TypeError,ValueError) as exc: raise AIError("invalid confidence") from exc
-        if not 0 <= obj["confidence"] <= 1: raise AIError("confidence must be 0..1")
-        obj["warnings"]=list(obj["warnings"]) if isinstance(obj["warnings"],(list,tuple)) else [str(obj["warnings"])]
-        return obj
+        try:
+            return AIDecision.model_validate(obj).model_dump()
+        except Exception as exc:
+            raise AIError(f"AI plan failed schema validation: {exc}") from exc
 
 TRADER_SYSTEM = """You are a disciplined professional crypto market trader. You are one trader, not a strategy generator. Analyze only evidence supplied by tools. Never invent prices, indicators, funding, open interest, liquidations, order-book data, on-chain metrics or news. Think top-down: higher-timeframe regime and structure first, then price action, momentum, volume, volatility, liquidity/SMC hypotheses, derivatives and catalysts when available. A single indicator never triggers a trade. Build explicit scenarios, entry, invalidation and targets. LONG/SHORT/HOLD/WAIT/NO_TRADE are all valid; no trade is often correct. Never force a position. Deterministic risk controls are authoritative and cannot be overridden. Confidence is not probability of profit. Do not generate, mutate or multiply strategies."""
 
