@@ -2,6 +2,9 @@ name: KiosAPI free model benchmark
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - scripts/kiosapi_free_model_benchmark.py
 
 jobs:
   benchmark:
@@ -12,7 +15,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install httpx
-      - name: Test documented free models
+      - name: Test current free model catalog
         env:
           KIOS_API_KEY: ${{ secrets.KIOS_API_KEY }}
           KIOSAPI_BASE_URL: https://router.kiosapi.com/v1/
