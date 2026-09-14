@@ -44,14 +44,27 @@ def orderbook_metrics(depth: dict,levels: int=20)->dict:
     bq,aq=sum(q for _,q in bids),sum(q for _,q in asks); mid=(bids[0][0]+asks[0][0])/2
     return {"available":True,"best_bid":bids[0][0],"best_ask":asks[0][0],"mid":mid,"spread_bps":(asks[0][0]-bids[0][0])/mid*10000,"bid_depth":bq,"ask_depth":aq,"imbalance":(bq-aq)/(bq+aq) if bq+aq else 0.0}
 
+def _number(record: dict, key: str) -> float | None:
+    try:
+        value = record.get(key)
+        if value is None or value == "":
+            return None
+        value = float(value)
+        return value if pd.notna(value) else None
+    except (TypeError, ValueError):
+        return None
+
 def derivative_metrics(funding: list,oi: list)->dict:
     f=funding[0] if funding else {}; o=oi[0] if oi else {}
-    try: fr=float(f.get("fundingRate",0.0))
-    except (TypeError,ValueError): fr=0.0
-    try: now=float(o.get("openInterest",0.0))
-    except (TypeError,ValueError): now=0.0
-    prev=None
-    if len(oi)>1:
-        try: prev=float(oi[1].get("openInterest",0.0))
-        except (TypeError,ValueError): pass
-    return {"funding_rate":fr,"open_interest":now,"open_interest_change_pct":((now/prev)-1)*100 if prev else None,"available":bool(funding or oi)}
+    fr=_number(f,"fundingRate")
+    now=_number(o,"openInterest")
+    prev=_number(oi[1],"openInterest") if len(oi)>1 else None
+    change=((now/prev)-1)*100 if now is not None and prev not in (None,0) else None
+    return {
+        "funding_rate":fr,
+        "open_interest":now,
+        "open_interest_change_pct":change,
+        "funding_available":fr is not None,
+        "open_interest_available":now is not None,
+        "available":fr is not None or now is not None,
+    }
