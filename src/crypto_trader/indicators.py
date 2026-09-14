@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 import numpy as np
 import pandas as pd
 
@@ -56,11 +55,24 @@ class Structure:
     bos: str | None
     choch: str | None
 
+
 def market_structure(df: pd.DataFrame, lookback: int=5) -> Structure:
-    x=df.tail(max(lookback*20, 100)); highs=x.high.rolling(lookback,center=True).max(); lows=x.low.rolling(lookback,center=True).min()
-    ph=x.high[ x.high.eq(highs) ].dropna(); pl=x.low[ x.low.eq(lows) ].dropna()
+    """Confirmed-swing structure; BOS/CHoCH only trigger after a closed candle breaks a prior swing."""
+    x=df.tail(max(lookback*30, 150)).reset_index(drop=True)
+    if len(x) < lookback * 3: return Structure("range", None, None, None, None)
+    ph=[]; pl=[]
+    for i in range(lookback, len(x)-lookback):
+        if x.high.iloc[i] == x.high.iloc[i-lookback:i+lookback+1].max(): ph.append((i,float(x.high.iloc[i])))
+        if x.low.iloc[i] == x.low.iloc[i-lookback:i+lookback+1].min(): pl.append((i,float(x.low.iloc[i])))
+    last_high=ph[-1][1] if ph else None; last_low=pl[-1][1] if pl else None
     trend="range"
     if len(ph)>=2 and len(pl)>=2:
-        if ph.iloc[-1]>ph.iloc[-2] and pl.iloc[-1]>pl.iloc[-2]: trend="bullish"
-        elif ph.iloc[-1]<ph.iloc[-2] and pl.iloc[-1]<pl.iloc[-2]: trend="bearish"
-    return Structure(trend, float(ph.iloc[-1]) if len(ph) else None, float(pl.iloc[-1]) if len(pl) else None, None, None)
+        if ph[-1][1]>ph[-2][1] and pl[-1][1]>pl[-2][1]: trend="bullish"
+        elif ph[-1][1]<ph[-2][1] and pl[-1][1]<pl[-2][1]: trend="bearish"
+    bos=None; choch=None
+    prior_high=ph[-1] if ph else None; prior_low=pl[-1] if pl else None
+    if prior_high and x.close.iloc[-1] > prior_high[1]: bos="bullish"
+    elif prior_low and x.close.iloc[-1] < prior_low[1]: bos="bearish"
+    if bos == "bullish" and trend == "bearish": choch="bullish"
+    elif bos == "bearish" and trend == "bullish": choch="bearish"
+    return Structure(trend,last_high,last_low,bos,choch)
