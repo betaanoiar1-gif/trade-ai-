@@ -1,0 +1,28 @@
+name: KiosAPI expanded free-model trading quality benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/kiosapi_trading_quality_benchmark_v2.py'
+      - '.github/workflows/kiosapi-trading-quality-v2.yml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install httpx
+      - name: Evaluate expanded free KiosAPI trading models
+        env:
+          KIOS_API_KEY: ${{ secrets.KIOS_API_KEY }}
+          KIOSAPI_BASE_URL: https://router.kiosapi.com/v1/
+          KIOSAPI_TRADING_BENCHMARK_MODELS: qwen3.8-27b,deepseek-v4-flash,deepseek-v4-flash-0731,glm-5.3-flash,qwen3.8-flash,nemotron-3-super-120b-a12b,gpt-oss-20b,oc/mimo-v2.5
+          KIOSAPI_BENCHMARK_REQUEST_INTERVAL_S: '10'
+          KIOSAPI_TRADING_BENCHMARK_MAX_TOKENS: '2048'
+        run: python scripts/kiosapi_trading_quality_benchmark_v2.py
