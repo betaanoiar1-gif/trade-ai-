@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .ai import AIError, AIGateway, TRADER_SYSTEM, decision_prompt
+from .ai import TRADER_SYSTEM, AIError, AIGateway, decision_prompt
 from .analysis import (
     derivative_metrics,
     detect_regime,
