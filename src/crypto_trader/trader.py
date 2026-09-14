@@ -21,6 +21,11 @@ class CryptoTrader:
         tech={k:(None if last[k]!=last[k] else float(last[k])) for k in ["ema20","ema50","ema200","rsi14","atr14","adx14","vwap","macd","macd_signal","macd_hist","bb_high","bb_low","rel_volume","volume_z"]}
         return {"symbol":self.symbol,"interval":interval,"timestamp":str(last.close_time),"data_age_seconds":data_age_seconds(last.close_time),"price":float(last.close),"technical":tech,"structure":market_structure(df).__dict__,"regime":detect_regime(base).__dict__,"multi_timeframe":multi_timeframe(frames),"orderbook":orderbook_metrics(depth),"derivatives":derivative_metrics(funding,oi),"fibonacci":fibonacci(base),"volume_profile":volume_profile(base)}
 
+    def _account_equity(self) -> float:
+        account=self.state.get("paper_account") or {}
+        try: return max(0.0, float(account.get("equity", self.limits.starting_equity)))
+        except (TypeError, ValueError): return self.limits.starting_equity
+
     def analyze(self):
         try: snap=self.snapshot()
         except MarketDataError as exc: return {"mode":"blocked","decision":"NO_TRADE","reason":str(exc)}
@@ -32,6 +37,8 @@ class CryptoTrader:
         self.state.log_decision(snap["timestamp"],self.symbol,plan)
         if plan["decision"] in {"LONG","SHORT"}:
             tp=TradePlan(symbol=self.symbol,decision=plan["decision"],confidence=plan["confidence"],entry_low=plan["entry_low"],entry_high=plan["entry_high"],stop=plan["stop"],take_profit_1=plan["take_profit_1"],take_profit_2=plan["take_profit_2"],thesis=plan["thesis"],invalidation=plan["invalidation"],warnings=tuple(plan["warnings"]),timestamp=snap["timestamp"])
-            risk=validate_plan(tp,snap["price"],self.limits,price=snap["price"])
-            return {"mode":"ai","snapshot":snap,"plan":plan,"risk":risk.__dict__}
+            equity=self._account_equity(); account=self.state.get("paper_account") or {}
+            current_exposure=float(account.get("exposure", 0.0) or 0.0)
+            risk=validate_plan(tp,equity,self.limits,price=snap["price"],current_exposure=current_exposure)
+            return {"mode":"ai","snapshot":snap,"plan":plan,"risk":risk.__dict__,"paper_equity":equity}
         return {"mode":"ai","snapshot":snap,"plan":plan,"risk":{"allowed":False,"reason":"non-executable decision"}}
