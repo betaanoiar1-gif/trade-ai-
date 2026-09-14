@@ -20,6 +20,8 @@ def test_regime_and_orderbook():
 def test_derivatives():
     d=derivative_metrics([{"fundingRate":"0.001"}],[{"openInterest":"110"},{"openInterest":"100"}])
     assert d["funding_rate"]==0.001 and d["open_interest_change_pct"]==10
+    missing=derivative_metrics([],[])
+    assert missing["funding_rate"] is None and missing["open_interest"] is None and not missing["available"]
 
 
 def test_risk_long_and_short():
@@ -35,8 +37,15 @@ def test_paper_short_and_stop():
 
 
 def test_state(tmp_path):
-    s=StateStore(str(tmp_path/"state.sqlite3")); s.set("equity",1000); assert s.get("equity")==1000
-    s.log_decision("now","BTCUSDT",{"decision":"WAIT"}); assert s.recent_decisions(1)[0]["payload"]["decision"]=="WAIT"; s.close()
+    s=StateStore(str(tmp_path/"state.sqlite3")); s.set("equity",1000)
+    s.log_decision("now","BTCUSDT",{"decision":"WAIT"})
+    assert s.recent_decisions(1)[0]["payload"]["decision"]=="WAIT"
+    s.log_trade("2026-09-14T10:00:00+00:00","BTCUSDT","CLOSE",{"pnl":-7.5})
+    s.log_trade("2026-09-14T11:00:00+00:00","BTCUSDT","CLOSE",{"pnl":2.5})
+    assert s.daily_realized_pnl("2026-09-14")==-5.0
+    s.set("paper_positions",{"BTCUSDT":{"qty":2,"entry":100}})
+    assert s.open_exposure()==200.0
+    s.close()
 
 
 def test_ai_plan_extraction():
