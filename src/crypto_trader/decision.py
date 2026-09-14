@@ -5,7 +5,7 @@ from typing import Literal
 
 
 class AIDecision(BaseModel):
-    decision: Literal["LONG","SHORT","HOLD","WAIT","NO_TRADE"]
+    decision: Literal["LONG", "SHORT", "HOLD", "WAIT", "NO_TRADE"]
     confidence: float = Field(ge=0, le=1)
     entry_low: float | None = Field(default=None, gt=0)
     entry_high: float | None = Field(default=None, gt=0)
