@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json, sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 class StateStore:
@@ -34,5 +35,32 @@ class StateStore:
     def recent_trades(self, limit: int = 20):
         rows = self.db.execute("SELECT ts,symbol,action,payload FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [{"ts":r[0], "symbol":r[1], "action":r[2], "payload":json.loads(r[3])} for r in rows]
+
+    def daily_realized_pnl(self, day=None) -> float:
+        """Net realized PnL from CLOSE events for the UTC calendar day."""
+        if day is None:
+            day = datetime.now(timezone.utc).date().isoformat()
+        start = f"{day}T00:00:00+00:00"
+        end = f"{day}T23:59:59.999999+00:00"
+        rows = self.db.execute("SELECT payload FROM trades WHERE action='CLOSE' AND ts>=? AND ts<=?", (start, end)).fetchall()
+        total = 0.0
+        for (payload,) in rows:
+            try:
+                value = json.loads(payload).get("pnl", 0.0)
+                if isinstance(value, (int, float)):
+                    total += float(value)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        return total
+
+    def open_exposure(self) -> float:
+        positions = self.get("paper_positions") or {}
+        total = 0.0
+        for raw in positions.values():
+            try:
+                total += abs(float(raw["qty"]) * float(raw["entry"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return total
 
     def close(self): self.db.close()
