@@ -84,11 +84,26 @@ class StateStore:
         return total
 
     def open_exposure(self) -> float:
+        """Aggregate absolute entry notional of currently open paper positions."""
         positions = self.get("paper_positions") or {}
         total = 0.0
         for raw in positions.values():
             try:
                 total += abs(float(raw["qty"]) * float(raw["entry"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return total
+
+    def open_risk_exposure(self) -> float:
+        """Aggregate loss to each stored stop, excluding positions without a valid stop."""
+        positions = self.get("paper_positions") or {}
+        total = 0.0
+        for raw in positions.values():
+            try:
+                qty = abs(float(raw["qty"]))
+                entry = float(raw["entry"])
+                stop = float(raw["stop"])
+                total += qty * abs(entry - stop)
             except (KeyError, TypeError, ValueError):
                 continue
         return total
