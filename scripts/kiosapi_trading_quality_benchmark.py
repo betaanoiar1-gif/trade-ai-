@@ -24,6 +24,11 @@ MODELS = [
     if x.strip()
 ]
 
+# KiosAPI has recently returned HTTP 429 after roughly 10 requests/minute for this
+# free key. Keep the benchmark deliberately below that ceiling so a rate limit is
+# not mistaken for a model-quality failure.
+REQUEST_INTERVAL_S = float(os.getenv("KIOSAPI_BENCHMARK_REQUEST_INTERVAL_S", "7.0"))
+
 
 @dataclass(frozen=True)
 class Case:
@@ -164,6 +169,8 @@ def run_model(client: httpx.Client, model: str) -> list[dict[str, Any]]:
             results.append({"case": case.name, "ok": True, "score": points, "detail": notes, "latency_s": round(elapsed, 3)})
         except Exception as exc:
             results.append({"case": case.name, "ok": False, "score": 0, "detail": type(exc).__name__, "latency_s": round(time.perf_counter() - started, 3)})
+        finally:
+            time.sleep(REQUEST_INTERVAL_S)
     return results
 
 
@@ -172,10 +179,13 @@ def main() -> int:
         raise SystemExit("KIOS_API_KEY is not configured")
     if not MODELS:
         raise SystemExit("No benchmark models configured")
+    if REQUEST_INTERVAL_S < 6.0:
+        raise SystemExit("KIOSAPI_BENCHMARK_REQUEST_INTERVAL_S must be >= 6 seconds")
 
     print(f"KIOSAPI_BASE_URL={BASE}")
     print(f"MODELS={json.dumps(MODELS)}")
     print(f"CASES={len(CASES)}")
+    print(f"REQUEST_INTERVAL_S={REQUEST_INTERVAL_S}")
 
     summaries = []
     with httpx.Client(timeout=45.0) as client:
@@ -187,9 +197,6 @@ def main() -> int:
             summary = {"model": model, "avg_score": round(avg, 2), "avg_latency_s": round(avg_latency, 3), "results": results}
             summaries.append(summary)
             print("MODEL_RESULT=" + json.dumps(summary, ensure_ascii=False))
-            # Keep total traffic below the observed KiosAPI 10-request/minute limit.
-            if model != MODELS[-1]:
-                time.sleep(2)
 
     ranked = sorted(summaries, key=lambda x: (-x["avg_score"], x["avg_latency_s"]))
     print("TRADING_QUALITY_RANKING=" + json.dumps(ranked, ensure_ascii=False))
