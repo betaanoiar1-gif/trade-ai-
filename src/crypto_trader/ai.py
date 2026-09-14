@@ -1,23 +1,55 @@
 from __future__ import annotations
-import os, json, httpx
+import json, os, time
 from typing import Any
+import httpx
 
 class AIError(RuntimeError): pass
 
 class AIGateway:
-    """OpenAI-compatible gateway. No provider is hard-coded into trading logic."""
+    """OpenAI-compatible gateway with bounded retries and strict JSON extraction."""
     def __init__(self, base_url: str|None=None, api_key: str|None=None, model: str|None=None):
         self.base=(base_url or os.getenv("AI_BASE_URL","")).rstrip("/")
-        self.key=api_key or os.getenv("AI_API_KEY",""); self.model=model or os.getenv("AI_MODEL","")
+        self.key=api_key or os.getenv("AI_API_KEY","")
+        self.model=model or os.getenv("AI_MODEL","")
+        self.timeout=float(os.getenv("AI_TIMEOUT", "45"))
+        self.retries=max(0,int(os.getenv("AI_RETRIES", "2")))
     def enabled(self): return bool(self.base and self.key and self.model)
     def chat(self, system: str, user: str, tools: list[dict[str,Any]]|None=None) -> dict[str,Any]:
         if not self.enabled(): raise AIError("AI gateway is not configured")
         body={"model":self.model,"messages":[{"role":"system","content":system},{"role":"user","content":user}],"temperature":0.1}
         if tools: body["tools"]=tools
-        r=httpx.post(self.base+"/chat/completions",headers={"Authorization":f"Bearer {self.key}"},json=body,timeout=60)
-        r.raise_for_status(); return r.json()
+        last=None
+        for attempt in range(self.retries+1):
+            try:
+                r=httpx.post(self.base+"/chat/completions",headers={"Authorization":f"Bearer {self.key}","Content-Type":"application/json"},json=body,timeout=self.timeout)
+                r.raise_for_status(); return r.json()
+            except Exception as exc:
+                last=exc
+                if attempt < self.retries: time.sleep(1.5*(attempt+1))
+        raise AIError(f"AI request failed after retries: {last}") from last
 
-TRADER_SYSTEM = """You are a disciplined professional crypto market trader. Analyze only evidence supplied by tools. Never invent prices, indicators, funding, open interest, liquidations, order-book data or news. Use top-down multi-timeframe context, market structure, price action, momentum, volume, volatility, liquidity/SMC hypotheses, derivatives and macro/crypto catalysts when available. A single indicator never triggers a trade. Always define invalidation. You may choose LONG, SHORT, HOLD, WAIT or NO_TRADE. Waiting is a valid decision. Do not generate or evolve strategies. Do not override deterministic risk controls. Confidence is not probability of profit."""
+    @staticmethod
+    def extract_plan(response: dict[str,Any]) -> dict[str,Any]:
+        try: content=response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc: raise AIError("AI response has no message content") from exc
+        if isinstance(content, list):
+            content="".join(part.get("text","") for part in content if isinstance(part,dict))
+        text=str(content).strip()
+        if text.startswith("```"):
+            text=text.strip("`").replace("json\n", "", 1).strip()
+        try: obj=json.loads(text)
+        except json.JSONDecodeError as exc: raise AIError("AI returned invalid JSON") from exc
+        required={"decision","confidence","entry_low","entry_high","stop","take_profit_1","take_profit_2","thesis","invalidation","warnings"}
+        missing=required-set(obj)
+        if missing: raise AIError(f"AI plan missing keys: {sorted(missing)}")
+        if obj["decision"] not in {"LONG","SHORT","HOLD","WAIT","NO_TRADE"}: raise AIError("invalid decision")
+        try: obj["confidence"]=float(obj["confidence"])
+        except (TypeError,ValueError) as exc: raise AIError("invalid confidence") from exc
+        if not 0 <= obj["confidence"] <= 1: raise AIError("confidence must be 0..1")
+        obj["warnings"]=list(obj["warnings"]) if isinstance(obj["warnings"],(list,tuple)) else [str(obj["warnings"])]
+        return obj
+
+TRADER_SYSTEM = """You are a disciplined professional crypto market trader. You are one trader, not a strategy generator. Analyze only evidence supplied by tools. Never invent prices, indicators, funding, open interest, liquidations, order-book data, on-chain metrics or news. Think top-down: higher-timeframe regime and structure first, then price action, momentum, volume, volatility, liquidity/SMC hypotheses, derivatives and catalysts when available. A single indicator never triggers a trade. Build explicit scenarios, entry, invalidation and targets. LONG/SHORT/HOLD/WAIT/NO_TRADE are all valid; no trade is often correct. Never force a position. Deterministic risk controls are authoritative and cannot be overridden. Confidence is not probability of profit. Do not generate, mutate or multiply strategies."""
 
 def decision_prompt(snapshot: dict[str,Any]) -> str:
-    return "Return a JSON trade plan only. Required keys: decision, confidence, entry_low, entry_high, stop, take_profit_1, take_profit_2, thesis, invalidation, warnings.\nMARKET SNAPSHOT:\n"+json.dumps(snapshot,default=str)
+    return "Return JSON only. Required keys: decision, confidence, entry_low, entry_high, stop, take_profit_1, take_profit_2, thesis, invalidation, warnings. Use null for unavailable numeric fields.\nMARKET SNAPSHOT:\n"+json.dumps(snapshot,default=str)
